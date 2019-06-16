@@ -9,18 +9,24 @@ import torch.optim as optim
 from ..utils import solutionmanager as sm
 from ..utils import gridsearch as gs
 
+import math
+
 class SolutionModel(nn.Module):
     def __init__(self, input_size, output_size, solution):
         super(SolutionModel, self).__init__()
         self.input_size = input_size
-        sm.SolutionManager.print_hint("Hint[1]: Increase hidden size")
+        # sm.SolutionManager.print_hint(f"Hint[1]: Increase hidden size {solution.hidden_size}")
         self.hidden_size = solution.hidden_size
         self.linear1 = nn.Linear(input_size, self.hidden_size)
         self.linear2 = nn.Linear(self.hidden_size, output_size)
+        self.relu = nn.Softmax()
+
+    def __repr__(self):
+        return str(self.linear1.weight) + "\n" + str(self.linear2.weight)
 
     def forward(self, x):
         x = self.linear1(x)
-        x = torch.sigmoid(x)
+        x = torch.relu(x)
         x = self.linear2(x)
         x = torch.sigmoid(x)
         return x
@@ -33,32 +39,54 @@ class SolutionModel(nn.Module):
         # Simple round output to predict value
         return output.round()
 
+
+run_grid_search = False
+# Uncomment next line if you want to run grid search
+# run_grid_search = True
 class Solution():
     def __init__(self):
         # Control speed of learning
-        self.learning_rate = 0.00001
-        # Control number of hidden neurons
-        self.hidden_size = 1
+        # [2, 16, 1]  ... max=42, avg=29.
+        self.learning_rate = 0.99
+        self.hidden_size = 24
+        self.rate = 1.
+        self.coef = 0.99
+        self.step = 3
+        # self.coef = 0.7
+        # self.learning_rate = 295
+        # Adadelta -> 295/0.7
 
         # Grid search settings, see grid_search_tutorial
-        self.learning_rate_grid = [0.001, 0.01, 0.1]
-        self.hidden_size_grid = [1, 2, 3]
-        # grid search will initialize this field
+        self.learning_rate_grid = [0.8, 0.9, 0.99, 2]
+        self.coef_grid = [0.99, 0.999, 1]
+        # self.step_grid = [2, 3, 4]
+        # self.rate_grid = [0.6, 0.7, 0.8, 0.9, 1.]
+        # self.learning_rate_grid = [0.1, 0.5, 0.9, 1.1, 1.5, 2, 2.5, 3, 5, 7, 9, 11] #[0.001, 0.01, 0.1]
+
         self.grid_search = None
-        # grid search will initialize this field
         self.iter = 0
-        # This fields indicate how many times to run with same arguments
+
         self.iter_number = 2
 
     # Return trained model
     def train_model(self, train_data, train_target, context):
         # Uncommend next line to understand grid search
-#        return self.grid_search_tutorial()
+        # return self.grid_search_tutorial()
         # Model represent our neural network
         model = SolutionModel(train_data.size(1), train_target.size(1), self)
         # Optimizer used for training neural network
-        sm.SolutionManager.print_hint("Hint[2]: Learning rate is too small", context.step)
-        optimizer = optim.SGD(model.parameters(), lr=self.learning_rate)
+        # sm.SolutionManager.print_hint("Hint[2]: Learning rate is too small", context.step)
+        optimizer = optim.SGD(model.parameters(), lr=self.learning_rate, momentum=self.rate)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, self.step, self.coef)
+        # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 0.5)
+
+
+
+        # optimizer = optim.SGD(model.parameters(), lr=self.learning_rate * math.exp(-self.coef * context.step))
+
+        # optimizer = optim.Adadelta(model.parameters(), lr=300*self.learning_rate)
+        # scheduler = optim.lr_scheduler.StepLR(optimizer, self.step, self.coef)
+        # optimizer = optim.SGD(model.parameters(), lr=self.learning_rate, momentum=self.rate, weight_decay=self.decay)
         while True:
             # Report step, so we know how many steps
             context.increase_step()
@@ -74,7 +102,7 @@ class Solution():
             total = predict.view(-1).size(0)
             # No more time left or learned everything, stop training
             time_left = context.get_timer().get_time_left()
-            if time_left < 0.1 or correct == total:
+            if time_left < 0.1 or correct == total or context.step > 500:
                 break
             # calculate error
             error = model.calc_error(output, train_target)
@@ -84,6 +112,13 @@ class Solution():
             self.print_stats(context.step, error, correct, total)
             # update model: model.parameters() -= lr * gradient
             optimizer.step()
+            scheduler.step()
+        if self.grid_search:
+            res = context.step if correct == total else 1000000
+            self.grid_search.add_result('steps', res)
+        # print("---Traiend")
+        # print(model)
+        print(context.step)
         return model
 
     def print_stats(self, step, error, correct, total):
@@ -148,11 +183,12 @@ class Config:
     def get_solution(self):
         return Solution()
 
-run_grid_search = False
-# Uncomment next line if you want to run grid search
-#run_grid_search = True
+# run_grid_search = False
+# # Uncomment next line if you want to run grid search
+# run_grid_search = True
 if run_grid_search:
     gs.GridSearch().run(Config(), case_number=1, random_order=False, verbose=True)
+    # gs.get_all_results('step')
 else:
     # If you want to run specific case, put number here
     sm.SolutionManager().run(Config(), case_number=-1)

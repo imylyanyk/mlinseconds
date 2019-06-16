@@ -110,4 +110,8 @@ class GridSearch():
 
             grid_choice_history[choice_str] = True
         print(solution_manager.accepted_string("[SEARCH COMPLETED]"))
+        e = self.get_all_results('steps')
+        for a, b in sorted([(sum(b)/len(b), a)  for a, b in e.items()]):
+            print(a, b)
+        # print(self.get_all_results('steps'))
         print("Specify case_number, if you want to search over other case data")
