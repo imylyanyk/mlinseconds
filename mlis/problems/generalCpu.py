@@ -42,9 +42,6 @@ class SolutionModel(nn.Module):
     def calc_predict(self, output):
         return output.round()
 
-run_grid_search = False
-# run_grid_search = True
-
 class Solution():
     def __init__(self):
         self.learning_rate = 0.0319
