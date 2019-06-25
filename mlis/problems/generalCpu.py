@@ -11,11 +11,88 @@ import torch.optim as optim
 from ..utils import solutionmanager as sm
 from ..utils import gridsearch as gs
 
+
+class SolutionModel(nn.Module):
+    def __init__(self, input_size, output_size, solution):
+        super(SolutionModel, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = solution.hidden_size
+
+        self.linear1 = nn.Linear(input_size, self.hidden_size)
+        self.linear2 = nn.Linear(self.hidden_size, output_size)
+        self.F = nn.BatchNorm1d(self.hidden_size, track_running_stats=False, momentum=0.5)
+        self.bil = nn.Bilinear(self.hidden_size, self.hidden_size, self.hidden_size)
+
+    def __repr__(self):
+        return str(self.linear1.weight) + "\n" + str(self.linear2.weight)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.F(x)
+        y = nn.LeakyReLU(0.035)(x)
+        x = self.bil(x, y)
+        x = nn.LeakyReLU(0.01)(x)
+        x = self.linear2(x)
+        x = torch.sigmoid(x)
+        return x
+
+    def calc_error(self, output, target):
+        return nn.BCELoss()(output, target).sum()
+
+    def calc_predict(self, output):
+        return output.round()
+
+run_grid_search = False
+# run_grid_search = True
+
 class Solution():
-    # Return trained model
+    def __init__(self):
+        self.learning_rate = 0.0319
+
+        self.hidden_size = 20 # * 8 + 21
+
+        self.grid_search = None
+        self.iter = 0
+
+        self.iter_number = 10
+
     def train_model(self, train_data, train_target, context):
-        print("See helloXor for solution template")
-        exit(0)
+        model = SolutionModel(train_data.size(1), train_target.size(1), self)
+        optimizer = optim.Rprop(model.parameters(), lr=self.learning_rate)
+
+        while True:
+            # p = torch.randperm(len(train_data))
+            # train_data = train_data[p]
+            # train_target = train_target[p]
+
+            # Report step, so we know how many steps
+            context.increase_step()
+            # model.parameters()...gradient set to zero
+            optimizer.zero_grad()
+            # evaluate model => model.forward(data)
+            output = model(train_data)
+            # if x < 0.5 predict 0 else predict 1
+            predict = model.calc_predict(output)
+            # Number of correct predictions
+            correct = predict.eq(train_target.view_as(predict)).long().sum().item()
+            # Total number of needed predictions
+            total = predict.view(-1).size(0)
+            # No more time left or learned everything, stop training
+            time_left = context.get_timer().get_time_left()
+            # print(time_left)
+            if time_left < 0.1 or correct == total:
+                break
+            # calculate error
+            error = model.calc_error(output, train_target)
+            # calculate deriviative of model.forward() and put it in model.parameters()...gradient
+            error.backward()
+            optimizer.step()
+
+        if self.grid_search:
+            res = context.step if correct == total else 1000000
+            self.grid_search.add_result('steps', res)
+
+        return model
 
 ###
 ###
