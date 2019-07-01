@@ -11,11 +11,120 @@ import torch.optim as optim
 from ..utils import solutionmanager as sm
 from ..utils import gridsearch as gs
 
+class SolutionModel(nn.Module):
+    def __init__(self, input_size, output_size, solution):
+        super(SolutionModel, self).__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+
+        self.hidden_size = solution.hidden_size
+
+        self.linear1 = nn.Linear(input_size, self.hidden_size)
+        self.linear5 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.linear2 = nn.Linear(self.hidden_size, self.output_size)
+
+        self.batch1 = nn.BatchNorm1d(self.hidden_size, track_running_stats=False)
+        self.batch5 = nn.BatchNorm1d(self.hidden_size, track_running_stats=False)
+
+
+    def forward(self, x):
+        x = nn.Sequential(self.linear1,
+                      nn.ReLU6(),
+                      self.batch1,
+
+                      self.linear5,
+                      nn.LeakyReLU(),
+                      self.batch5,
+                      # nn.Dropout(),
+
+                      self.linear2,
+                      nn.Sigmoid()
+            ).forward(x)
+        return x
+
+    def calc_error(self, output, target):
+        return nn.BCELoss()(output, target)
+
+
+    def calc_predict(self, output):
+        return output.round()
+
 class Solution():
-    # Return trained model
-    def train_model(self, train_data, train_target, context):
-        print("See helloXor for solution template")
-        exit(0)
+    def __init__(self):
+        self.learning_rate = 0.021
+        self.weight_decay = 0.000001
+
+        self.hidden_size = 32
+
+        self.grid_search = None
+        # grid search will initialize this field
+        self.iter = 0
+        # This fields indicate how many times to run with same arguments
+        self.iter_number = 1
+
+
+    def train_model(self, train_data_all, train_target_all, context):
+        model = SolutionModel(train_data_all.size(1), train_target_all.size(1), self)
+
+        def init_weights(m):
+            if type(m) == nn.Linear:
+                torch.nn.init.xavier_uniform_(m.weight)
+                m.bias.data.fill_(0.0)
+        model.apply(init_weights)
+
+        optimizer = optim.Adam(model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+
+        p = torch.randperm(len(train_data_all))
+        L = 0
+        R = 0
+        STEP = 4096 // 8
+
+        R += STEP
+        while True:
+            if R > len(train_data_all):
+                L = 0
+                R = STEP
+                p = torch.randperm(len(train_data_all))
+
+            train_data = train_data_all[p[L:R]]
+            train_target = train_target_all[p[L:R]]
+            L += STEP
+            R += STEP
+
+            # Report step, so we know how many steps
+            context.increase_step()
+            # model.parameters()...gradient set to zero
+            optimizer.zero_grad()
+            # evaluate model => model.forward(data)
+            output = model(train_data)
+            # if x < 0.5 predict 0 else predict 1
+            predict = model.calc_predict(output)
+            # Number of correct predictions
+            correct = predict.eq(train_target.view_as(predict)).long().sum().item()
+            # Total number of needed predictions
+            total = predict.view(-1).size(0)
+            # No more time left or learned everything, stop training
+            time_left = context.get_timer().get_time_left()
+            # print(time_left)
+            if time_left < 0.1:# or correct == total:
+                # print(f"{correct} vs {total} [{time_left}]")
+                break
+            # calculate error
+            error = model.calc_error(output, train_target)
+            # calculate deriviative of model.forward() and put it in model.parameters()...gradient
+            error.backward()
+            # self.print_stats(context.step, error, correct, total)
+            optimizer.step()
+
+        if self.grid_search:
+            res = context.step if correct == total else 1000000
+            self.grid_search.add_result('steps', res)
+
+        return model
+
+    def print_stats(self, step, error, correct, total):
+        if step % 10 == 0:
+            print("Step = {} Correct = {}/{} Error = {}".format(step, correct, total, error.item()))
 
 ###
 ###
